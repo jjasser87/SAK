@@ -50,17 +50,21 @@ def convert_all_docx_in_dir(directory="."):
     files = [f for f in os.listdir(directory) if f.lower().endswith(".docx")]
     
     if not files:
-        print("No .docx files found in the current directory.")
+        print(f"No .docx files found in: {directory}")
         return
 
-    print(f"Found {len(files)} .docx files. Starting conversion...")
+    print(f"Found {len(files)} .docx files in: {directory}. Starting conversion...")
     for docx_file in files:
         convert_docx_to_pdf(os.path.join(directory, docx_file))
 
 if __name__ == "__main__":
-    # If a filename is provided as an argument, convert only that file.
+    # If an argument is provided, check if it's a file or a directory.
     # Otherwise, convert all .docx files in the current directory.
     if len(sys.argv) > 1:
-        convert_docx_to_pdf(sys.argv[1])
+        path = sys.argv[1]
+        if os.path.isdir(path):
+            convert_all_docx_in_dir(path)
+        else:
+            convert_docx_to_pdf(path)
     else:
         convert_all_docx_in_dir()
