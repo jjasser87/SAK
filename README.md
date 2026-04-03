@@ -3,8 +3,22 @@
 A collection of utility scripts for miscellaneous tasks.
 
 ## Table of Contents
+- [Benchmarks](#benchmarks)
 - [PDF Converters](#pdf-converters)
 - [Requirements](#requirements)
+
+## Benchmarks
+
+Located in the `benchmarks/` directory, these scripts help you run local performance comparisons.
+
+### 1. `benchmark_cpu.py`
+Runs a simple CPU benchmark using prime counting, Monte Carlo Pi estimation, and SHA-256 hashing.
+- **Usage**: `python benchmarks/benchmark_cpu.py`
+- **Options**:
+  - `--repeats` to control how many times each benchmark runs
+  - `--prime-limit` to adjust the prime-counting workload
+  - `--pi-iterations` to adjust the Monte Carlo workload
+  - `--hash-rounds` and `--hash-block-size` to adjust the hashing workload
 
 ## PDF Converters
 
