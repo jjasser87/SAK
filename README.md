@@ -45,9 +45,16 @@ Converts `.png` files to `.pdf`.
   - `python converters/convert_png_to_pdf.py <filename>.png` (converts a specific file)
 - **Dependency**: Requires `Pillow`.
 
+### 4. `convert_r_to_pdf.py`
+Converts `.R` scripts to paginated `.pdf` files by laying out the source code in a monospaced PDF document.
+- **Usage**:
+  - `python converters/convert_r_to_pdf.py` (converts all `.R` files in the current directory)
+  - `python converters/convert_r_to_pdf.py <filename>.R` (converts a specific file)
+- **Dependency**: Requires `reportlab`.
+
 ## Requirements
 
-The image conversion scripts require the `Pillow` library. You can install it using:
+The converter scripts require `Pillow` and `reportlab`. You can install them using:
 ```bash
 pip install -r requirements.txt
 ```
