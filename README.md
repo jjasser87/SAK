@@ -6,6 +6,7 @@ A collection of utility scripts for miscellaneous tasks.
 - [Benchmarks](#benchmarks)
 - [PDF Converters](#pdf-converters)
 - [Requirements](#requirements)
+- [Calendar Sync](#calendar-sync)
 
 ## Benchmarks
 
@@ -54,9 +55,53 @@ Converts `.R` scripts to paginated `.pdf` files by laying out the source code in
 
 ## Requirements
 
-The converter scripts require `Pillow` and `reportlab`. You can install them using:
+The utility scripts use the packages listed in `requirements.txt`. You can install them using:
 ```bash
 pip install -r requirements.txt
 ```
 
 Note: `convert_docx_to_pdf.py` supports `--engine auto`, `--engine libreoffice`, and `--engine word`. The default is `auto`, which prefers LibreOffice and falls back to Microsoft Word on macOS.
+
+## Calendar Sync
+
+Located in the `calendars/` directory, these scripts help move calendar data between services.
+
+### 1. `sync_outlook_ics_to_google.py`
+Downloads an Outlook `.ics` calendar feed and syncs it into a Google Calendar.
+
+- **Usage**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py --calendar-id "primary"
+  ```
+  By default, the script reads the Outlook ICS URL from `calendars/ics.txt`.
+- **Dry run**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py \
+    --calendar-id "primary" \
+    --dry-run
+  ```
+- **Override the default ICS URL**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py \
+    --ics-url "https://outlook.office365.com/owa/calendar/..."
+  ```
+- **Use a different fallback timezone**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py --time-zone "America/Chicago"
+  ```
+- **Authorize Google only, without syncing**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py --auth-only
+  ```
+- **Delete events removed from Outlook**:
+  ```bash
+  python calendars/sync_outlook_ics_to_google.py \
+    --calendar-id "primary" \
+    --delete-missing
+  ```
+- **Google setup**:
+  1. Create an OAuth desktop client in Google Cloud with the Google Calendar API enabled.
+  2. Download the OAuth client file as `credentials.json` in this repo, or pass it with `--credentials`.
+  3. Run the script once interactively. It opens a browser for Google consent and stores `token.json`.
+
+The sync is one-way from Outlook to Google. It uses each Outlook event's iCalendar UID to avoid duplicate Google events on repeated runs. Recurring event rules are copied, but standalone recurrence exceptions are skipped with a warning because they need manual review. The default `calendars/ics.txt` file is ignored by git because it contains a private calendar URL. If Outlook exports events without timezone data, or uses a Windows timezone name such as `Eastern Standard Time`, the script uses `America/New_York` unless you pass `--time-zone`.

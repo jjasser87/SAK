@@ -1,0 +1,6 @@
+credentials.json
+token.json
+calendars/ics.txt
+.DS_Store
+__pycache__/
+*.pyc
