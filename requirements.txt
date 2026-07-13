@@ -3,3 +3,9 @@ reportlab
 google-api-python-client
 google-auth-oauthlib
 icalendar
+msal
+beautifulsoup4
+markdownify
+readability-lxml
+requests
+pypdf

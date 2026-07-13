@@ -5,6 +5,7 @@ A collection of utility scripts for miscellaneous tasks.
 ## Table of Contents
 - [Benchmarks](#benchmarks)
 - [PDF Converters](#pdf-converters)
+- [Article Extractor](#article-extractor)
 - [Requirements](#requirements)
 - [Calendar Sync](#calendar-sync)
 
@@ -52,6 +53,44 @@ Converts `.R` scripts to paginated `.pdf` files by laying out the source code in
   - `python converters/convert_r_to_pdf.py` (converts all `.R` files in the current directory)
   - `python converters/convert_r_to_pdf.py <filename>.R` (converts a specific file)
 - **Dependency**: Requires `reportlab`.
+
+## Article Extractor
+
+`articles/extract_articles.py` downloads web pages, isolates the readable article body,
+keeps inline article images, and writes Markdown, PDF, or both. It accepts direct URLs
+and `.txt`, `.md`, or `.markdown` files containing bare URLs or Markdown links.
+
+- **One URL to Markdown**:
+  ```bash
+  python articles/extract_articles.py "https://example.com/article"
+  ```
+- **A URL-list file to individual PDFs**:
+  ```bash
+  python articles/extract_articles.py urls.txt --format pdf --page-size A4
+  ```
+- **Several inputs into one Markdown file and one PDF**:
+  ```bash
+  python articles/extract_articles.py \
+    "https://example.com/one" reading-list.md \
+    --format both \
+    --combine reading-pack
+  ```
+- **Choose an output directory**:
+  ```bash
+  python articles/extract_articles.py urls.txt \
+    --format markdown \
+    --output-dir saved-articles
+  ```
+
+Markdown defaults to `output/articles/`, with downloaded images in a neighboring
+`<article>_assets/` folder. PDFs default to `output/pdf/` and embed the images in the
+document. Use `--no-images` for text-only output. The extractor works on server-rendered
+article HTML; pages that require JavaScript execution, authentication, or anti-bot
+challenges may need a browser-based workflow instead.
+
+PDF output defaults to Letter size. Use `--page-size` with `LETTER`, `LEGAL`,
+`TABLOID`, `LEDGER`, `EXECUTIVE`, or `A0` through `A6`. Values are
+case-insensitive, so `--page-size a5` is valid.
 
 ## Requirements
 
