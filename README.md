@@ -81,10 +81,18 @@ and `.txt`, `.md`, or `.markdown` files containing bare URLs or Markdown links.
     --format markdown \
     --output-dir saved-articles
   ```
+- **Keep web image links in Markdown instead of downloading image files**:
+  ```bash
+  python articles/extract_articles.py urls.txt --remote-images
+  ```
 
 Markdown defaults to `output/articles/`, with downloaded images in a neighboring
 `<article>_assets/` folder. PDFs default to `output/pdf/` and embed the images in the
-document. Use `--no-images` for text-only output. The extractor works on server-rendered
+document. If a Markdown image cannot be downloaded, its original remote URL is retained;
+`--remote-images` uses remote URLs for all Markdown images. If a PDF image cannot be
+embedded, the PDF includes a clickable source link in its place. Use `--no-images` for
+text-only output. The extractor also recovers lazy-loaded image URLs stored in embedded
+JSON page data when the readable HTML contains only placeholders. It works on server-rendered
 article HTML; pages that require JavaScript execution, authentication, or anti-bot
 challenges may need a browser-based workflow instead.
 

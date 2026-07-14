@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import html
 import io
+import json
 import re
 import sys
 import tempfile
@@ -118,6 +119,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Remove images instead of downloading and including them.",
     )
     parser.add_argument(
+        "--remote-images",
+        action="store_true",
+        help="Keep remote image URLs in Markdown instead of downloading image files.",
+    )
+    parser.add_argument(
         "--page-size",
         type=str.upper,
         choices=PAGE_SIZES,
@@ -217,11 +223,54 @@ def normalize_image_source(tag: Tag, base_url: str) -> str | None:
     return absolute if is_http_url(absolute) else None
 
 
+def image_key(tag: Tag) -> str:
+    return " ".join(str(tag.get("alt", "")).split()).casefold()
+
+
+def embedded_image_sources(soup: BeautifulSoup, base_url: str) -> dict[str, str]:
+    """Recover real image URLs stored in JSON-rendered HTML fragments.
+
+    Some JavaScript sites render data-URI placeholders in the page while keeping the
+    original article markup in an application/json script. Match those originals to
+    the visible placeholders by alt text.
+    """
+    sources: dict[str, str] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str) and "<img" in value.lower():
+            fragment = BeautifulSoup(value, "html.parser")
+            for image in fragment.find_all("img"):
+                key = image_key(image)
+                source = normalize_image_source(image, base_url)
+                if key and source:
+                    sources.setdefault(key, source)
+
+    for script in soup.find_all("script", attrs={"type": "application/json"}):
+        raw = script.string
+        if not raw:
+            continue
+        try:
+            visit(json.loads(raw))
+        except (TypeError, ValueError):
+            continue
+    return sources
+
+
 def extract_article(page_html: str, source_url: str) -> Article:
     original = BeautifulSoup(page_html, "html.parser")
+    recovered_images = embedded_image_sources(original, source_url)
     document = Document(page_html, url=source_url)
     readable_html = document.summary(html_partial=True)
     content = BeautifulSoup(readable_html, "html.parser")
+
+    for image_button in content.select("button:has(img)"):
+        image_button.unwrap()
 
     for unwanted in content.select("script, style, nav, form, button, noscript, iframe, canvas"):
         unwanted.decompose()
@@ -236,6 +285,8 @@ def extract_article(page_html: str, source_url: str) -> Article:
             image.decompose()
             continue
         source = normalize_image_source(image, source_url)
+        if not source:
+            source = recovered_images.get(image_key(image))
         if not source:
             image.decompose()
             continue
@@ -383,6 +434,7 @@ def render_markdown(
     output_path: Path,
     downloader: Downloader,
     include_images: bool,
+    download_images: bool = True,
 ) -> list[str]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     assets_dir = output_path.parent / f"{output_path.stem}_assets"
@@ -391,12 +443,12 @@ def render_markdown(
 
     for article in articles:
         content_html = article.content_html
-        if include_images:
+        if include_images and download_images:
             content_html, _, image_warnings = localize_images(
                 content_html, assets_dir, downloader, relative_to=output_path.parent
             )
             warnings.extend(image_warnings)
-        else:
+        elif not include_images:
             soup = BeautifulSoup(content_html, "html.parser")
             for image in soup.find_all("img"):
                 image.decompose()
@@ -411,7 +463,7 @@ def render_markdown(
         sections.append(f"{article_metadata_markdown(article)}\n{body}".rstrip())
 
     output_path.write_text("\n\n---\n\n".join(sections) + "\n", encoding="utf-8")
-    if include_images and not any(assets_dir.iterdir()):
+    if assets_dir.exists() and not any(assets_dir.iterdir()):
         assets_dir.rmdir()
     return warnings
 
@@ -586,6 +638,15 @@ def html_to_flowables(
             alt = str(tag.get("alt", "")).strip()
             if alt:
                 story.append(Paragraph(html.escape(alt), styles["caption"]))
+        elif is_http_url(source):
+            escaped_source = html.escape(source, quote=True)
+            host = html.escape(urlparse(source).netloc)
+            story.append(
+                Paragraph(
+                    f'<a href="{escaped_source}">Image source: {host}</a>',
+                    styles["caption"],
+                )
+            )
 
     def visit(parent: Tag | BeautifulSoup) -> None:
         for child in parent.children:
@@ -790,7 +851,11 @@ def run(args: argparse.Namespace) -> int:
             try:
                 if output_format == "markdown":
                     warnings = render_markdown(
-                        batch, output_path, downloader, include_images=not args.no_images
+                        batch,
+                        output_path,
+                        downloader,
+                        include_images=not args.no_images,
+                        download_images=not args.remote_images,
                     )
                 else:
                     warnings = render_pdf(

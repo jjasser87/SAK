@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from PIL import Image as PillowImage
@@ -40,6 +41,11 @@ SAMPLE_HTML = """
   </body>
 </html>
 """
+IGN_IMAGE_URL = (
+    "https://oyster.ignimgs.com/mediawiki/apis.ign.com/octopath-traveler-2/9/9a/"
+    "Octopath_Traveler_2_Prison_Underground_Passage_Map.png?"
+    "width=814&dpr=2&format=jpg&auto=webp&quality=80"
+)
 
 
 class FakeDownloader:
@@ -48,6 +54,11 @@ class FakeDownloader:
 
     def fetch_image(self, url: str) -> tuple[bytes, str]:
         return self.image_bytes, "image/png"
+
+
+class FailingDownloader:
+    def fetch_image(self, url: str) -> tuple[bytes, str]:
+        raise OSError("simulated image download failure")
 
 
 def png_bytes() -> bytes:
@@ -62,6 +73,10 @@ class ArticleExtractorTests(unittest.TestCase):
     def test_page_size_argument_is_case_insensitive(self) -> None:
         args = parse_args(["https://example.com/story", "--page-size", "a4"])
         self.assertEqual(args.page_size, "A4")
+
+    def test_remote_images_argument(self) -> None:
+        args = parse_args(["https://example.com/story", "--remote-images"])
+        self.assertTrue(args.remote_images)
 
     def test_extract_urls_from_markdown_and_plain_text(self) -> None:
         text = """
@@ -84,6 +99,34 @@ class ArticleExtractorTests(unittest.TestCase):
         self.assertIn("https://example.com/related", article.content_html)
         self.assertNotIn("Unrelated navigation", article.content_html)
 
+    def test_extract_article_recovers_lazy_image_from_embedded_json(self) -> None:
+        embedded_html = (
+            '<p><img alt="Dungeon Map" '
+            f'src="{IGN_IMAGE_URL}" srcset="{IGN_IMAGE_URL} 1024w"></p>'
+        )
+        page_html = f"""
+        <html>
+          <head><title>Lazy Images</title></head>
+          <body>
+            <article>
+              <h1>Lazy Images</h1>
+              <p>This article has enough readable text to preserve its content.</p>
+              <button title="Click to Show">
+                <img alt="Dungeon Map" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAA">
+              </button>
+            </article>
+            <script id="__NEXT_DATA__" type="application/json">
+              {json.dumps({"props": {"html": embedded_html}})}
+            </script>
+          </body>
+        </html>
+        """
+
+        article = extract_article(page_html, "https://example.com/story")
+
+        self.assertIn(IGN_IMAGE_URL.replace("&", "&amp;"), article.content_html)
+        self.assertNotIn("data:image", article.content_html)
+
     def test_render_markdown_downloads_image_into_assets_folder(self) -> None:
         article = extract_article(SAMPLE_HTML, "https://example.com/story")
         with tempfile.TemporaryDirectory() as directory:
@@ -99,6 +142,41 @@ class ArticleExtractorTests(unittest.TestCase):
             self.assertEqual(content.count("# Example Article"), 1)
             self.assertIn("article_assets/", content)
             self.assertEqual(len(assets), 1)
+
+    def test_render_markdown_can_keep_remote_image_urls(self) -> None:
+        article = Article(
+            title="Remote Image",
+            source_url="https://example.com/story",
+            content_html=f'<p><img src="{IGN_IMAGE_URL}" alt=""></p>',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "article.md"
+            warnings = render_markdown(
+                [article],
+                output,
+                FailingDownloader(),
+                include_images=True,
+                download_images=False,
+            )
+
+            self.assertEqual(warnings, [])
+            self.assertIn(f"![]({IGN_IMAGE_URL})", output.read_text(encoding="utf-8"))
+            self.assertFalse((Path(directory) / "article_assets").exists())
+
+    def test_failed_markdown_download_falls_back_to_remote_url(self) -> None:
+        article = Article(
+            title="Remote Image",
+            source_url="https://example.com/story",
+            content_html=f'<p><img src="{IGN_IMAGE_URL}" alt=""></p>',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "article.md"
+            warnings = render_markdown(
+                [article], output, FailingDownloader(), include_images=True
+            )
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn(f"![]({IGN_IMAGE_URL})", output.read_text(encoding="utf-8"))
 
     def test_render_pdf_contains_article_text_and_embedded_image(self) -> None:
         article = extract_article(SAMPLE_HTML, "https://example.com/story")
@@ -142,6 +220,33 @@ class ArticleExtractorTests(unittest.TestCase):
                     self.assertAlmostEqual(
                         float(page.mediabox.height), PAGE_SIZES[name][1], places=2
                     )
+
+    def test_failed_pdf_image_download_adds_clickable_source_link(self) -> None:
+        article = Article(
+            title="Remote Image",
+            source_url="https://example.com/story",
+            content_html=f'<p><img src="{IGN_IMAGE_URL}" alt=""></p>',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "article.pdf"
+            warnings = render_pdf(
+                [article],
+                output,
+                FailingDownloader(),
+                include_images=True,
+                temp_root=root / "tmp",
+            )
+            reader = PdfReader(output)
+            annotations = reader.pages[0].get("/Annots", [])
+            urls = [
+                annotation.get_object()["/A"]["/URI"]
+                for annotation in annotations
+                if annotation.get_object().get("/A")
+            ]
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn(IGN_IMAGE_URL, urls)
 
 
 if __name__ == "__main__":
