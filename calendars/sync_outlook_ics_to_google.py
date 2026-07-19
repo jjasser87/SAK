@@ -96,6 +96,7 @@ def parse_args() -> argparse.Namespace:
 
 def google_calendar_service(credentials_path: Path, token_path: Path) -> Any:
     from google.auth.transport.requests import Request
+    from google.auth.exceptions import RefreshError
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
@@ -106,8 +107,16 @@ def google_calendar_service(credentials_path: Path, token_path: Path) -> Any:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                print(
+                    f"Saved Google token is no longer valid; reauthorizing using "
+                    f"{credentials_path}."
+                )
+                creds = None
+
+        if not creds or not creds.valid:
             if not credentials_path.exists():
                 raise FileNotFoundError(
                     f"Missing Google OAuth client file: {credentials_path}"
