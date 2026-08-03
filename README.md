@@ -66,7 +66,7 @@ and `.txt`, `.md`, or `.markdown` files containing bare URLs or Markdown links.
   ```
 - **A URL-list file to individual PDFs**:
   ```bash
-  python articles/extract_articles.py urls.txt --format pdf --page-size A4
+  python articles/extract_articles.py urls.txt --format pdf --page-size LEGAL --scale 90
   ```
 - **Several inputs into one Markdown file and one PDF**:
   ```bash
@@ -96,9 +96,12 @@ JSON page data when the readable HTML contains only placeholders. It works on se
 article HTML; pages that require JavaScript execution, authentication, or anti-bot
 challenges may need a browser-based workflow instead.
 
-PDF output defaults to Letter size. Use `--page-size` with `LETTER`, `LEGAL`,
-`TABLOID`, `LEDGER`, `EXECUTIVE`, or `A0` through `A6`. Values are
-case-insensitive, so `--page-size a5` is valid.
+PDF output defaults to Letter size. Use `--page-size` with `LETTER`, `HALF_LETTER`,
+`LEGAL`, `GOV_LETTER`, `GOV_LEGAL`, `JUNIOR_LEGAL`, `TABLOID`, `LEDGER`,
+`EXECUTIVE`, `A0` through `A7`, or `B0` through `B7`. Values are case-insensitive,
+so `--page-size b5` is valid. Use `--scale PERCENT` (also `--zoom` or
+`--zoom-scale`) to size PDF content from 25% to 200%; the paper dimensions do
+not change.
 
 ## Requirements
 

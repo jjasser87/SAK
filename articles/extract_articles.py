@@ -31,6 +31,19 @@ from reportlab.lib.pagesizes import (
     A4,
     A5,
     A6,
+    A7,
+    B0,
+    B1,
+    B2,
+    B3,
+    B4,
+    B5,
+    B6,
+    B7,
+    GOV_LEGAL,
+    GOV_LETTER,
+    HALF_LETTER,
+    JUNIOR_LEGAL,
     LEGAL,
     LEDGER,
     LETTER,
@@ -62,7 +75,11 @@ MAX_HTML_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 PAGE_SIZES = {
     "LETTER": LETTER,
+    "HALF_LETTER": HALF_LETTER,
     "LEGAL": LEGAL,
+    "GOV_LETTER": GOV_LETTER,
+    "GOV_LEGAL": GOV_LEGAL,
+    "JUNIOR_LEGAL": JUNIOR_LEGAL,
     "TABLOID": TABLOID,
     "LEDGER": LEDGER,
     "EXECUTIVE": (7.25 * inch, 10.5 * inch),
@@ -73,7 +90,26 @@ PAGE_SIZES = {
     "A4": A4,
     "A5": A5,
     "A6": A6,
+    "A7": A7,
+    "B0": B0,
+    "B1": B1,
+    "B2": B2,
+    "B3": B3,
+    "B4": B4,
+    "B5": B5,
+    "B6": B6,
+    "B7": B7,
 }
+
+
+def scale_percentage(value: str) -> float:
+    try:
+        percentage = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("scale must be a number") from exc
+    if not 25 <= percentage <= 200:
+        raise argparse.ArgumentTypeError("scale must be between 25 and 200 percent")
+    return percentage
 
 
 @dataclass(frozen=True)
@@ -129,6 +165,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=PAGE_SIZES,
         default="LETTER",
         help="PDF print size. Defaults to LETTER.",
+    )
+    parser.add_argument(
+        "--scale",
+        "--zoom",
+        "--zoom-scale",
+        type=scale_percentage,
+        default=100.0,
+        metavar="PERCENT",
+        help="PDF content scale from 25 to 200 percent. Defaults to 100.",
     )
     parser.add_argument(
         "--timeout",
@@ -468,89 +513,93 @@ def render_markdown(
     return warnings
 
 
-def pdf_styles() -> dict[str, ParagraphStyle]:
+def pdf_styles(scale: float = 1.0) -> dict[str, ParagraphStyle]:
+    if scale <= 0:
+        raise ValueError("PDF scale must be greater than zero")
     sample = getSampleStyleSheet()
     return {
         "title": ParagraphStyle(
             "ArticleTitle",
             parent=sample["Title"],
             fontName="Helvetica-Bold",
-            fontSize=22,
-            leading=27,
+            fontSize=22 * scale,
+            leading=27 * scale,
             textColor=colors.HexColor("#172033"),
-            spaceAfter=12,
+            spaceAfter=12 * scale,
         ),
         "meta": ParagraphStyle(
             "ArticleMeta",
             parent=sample["Normal"],
             fontName="Helvetica-Oblique",
-            fontSize=9,
-            leading=13,
+            fontSize=9 * scale,
+            leading=13 * scale,
             textColor=colors.HexColor("#596579"),
-            spaceAfter=5,
+            spaceAfter=5 * scale,
         ),
         "source": ParagraphStyle(
             "ArticleSource",
             parent=sample["Normal"],
-            fontSize=8,
-            leading=11,
+            fontSize=8 * scale,
+            leading=11 * scale,
             textColor=colors.HexColor("#3267a8"),
-            spaceAfter=16,
+            spaceAfter=16 * scale,
         ),
         "body": ParagraphStyle(
             "ArticleBody",
             parent=sample["BodyText"],
             fontName="Helvetica",
-            fontSize=10.5,
-            leading=15.5,
+            fontSize=10.5 * scale,
+            leading=15.5 * scale,
             textColor=colors.HexColor("#1f2937"),
-            spaceAfter=9,
+            spaceAfter=9 * scale,
         ),
         "blockquote": ParagraphStyle(
             "ArticleQuote",
             parent=sample["BodyText"],
             fontName="Helvetica-Oblique",
-            fontSize=10,
-            leading=15,
-            leftIndent=18,
-            rightIndent=12,
+            fontSize=10 * scale,
+            leading=15 * scale,
+            leftIndent=18 * scale,
+            rightIndent=12 * scale,
             borderColor=colors.HexColor("#9ba8ba"),
-            borderWidth=1.5,
-            borderPadding=7,
-            spaceAfter=10,
+            borderWidth=1.5 * scale,
+            borderPadding=7 * scale,
+            spaceAfter=10 * scale,
         ),
         "code": ParagraphStyle(
             "ArticleCode",
             parent=sample["Code"],
             fontName="Courier",
-            fontSize=8,
-            leading=11,
-            leftIndent=10,
-            rightIndent=10,
+            fontSize=8 * scale,
+            leading=11 * scale,
+            leftIndent=10 * scale,
+            rightIndent=10 * scale,
             backColor=colors.HexColor("#f3f4f6"),
-            borderPadding=7,
-            spaceAfter=10,
+            borderPadding=7 * scale,
+            spaceAfter=10 * scale,
         ),
         "caption": ParagraphStyle(
             "ArticleCaption",
             parent=sample["Normal"],
             alignment=TA_CENTER,
             fontName="Helvetica-Oblique",
-            fontSize=8,
-            leading=11,
+            fontSize=8 * scale,
+            leading=11 * scale,
             textColor=colors.HexColor("#687386"),
-            spaceAfter=12,
+            spaceAfter=12 * scale,
         ),
         **{
             f"h{level}": ParagraphStyle(
                 f"ArticleH{level}",
                 parent=sample[f"Heading{min(level, 3)}"],
                 fontName="Helvetica-Bold",
-                fontSize={1: 18, 2: 15, 3: 13, 4: 11.5, 5: 10.5, 6: 10}[level],
-                leading={1: 22, 2: 19, 3: 17, 4: 15, 5: 14, 6: 14}[level],
+                fontSize={1: 18, 2: 15, 3: 13, 4: 11.5, 5: 10.5, 6: 10}[level]
+                * scale,
+                leading={1: 22, 2: 19, 3: 17, 4: 15, 5: 14, 6: 14}[level]
+                * scale,
                 textColor=colors.HexColor("#172033"),
-                spaceBefore=10,
-                spaceAfter=6,
+                spaceBefore=10 * scale,
+                spaceAfter=6 * scale,
             )
             for level in range(1, 7)
         },
@@ -582,15 +631,28 @@ def inline_markup(node: Tag | NavigableString) -> str:
     return inner
 
 
-def image_flowable(path: Path, max_width: float, max_height: float = 6.6 * inch) -> Image:
+def image_flowable(
+    path: Path,
+    max_width: float,
+    max_height: float = 6.6 * inch,
+    scale: float = 1.0,
+) -> Image:
     with PillowImage.open(path) as source:
         width, height = source.size
-    scale = min(max_width / width, max_height / height, 1.0)
-    return Image(str(path), width=width * scale, height=height * scale, hAlign="CENTER")
+    image_scale = min(max_width / width, max_height / height, scale)
+    return Image(
+        str(path),
+        width=width * image_scale,
+        height=height * image_scale,
+        hAlign="CENTER",
+    )
 
 
 def table_flowable(
-    tag: Tag, styles: dict[str, ParagraphStyle], content_width: float
+    tag: Tag,
+    styles: dict[str, ParagraphStyle],
+    content_width: float,
+    scale: float = 1.0,
 ) -> Table | None:
     rows: list[list[Paragraph]] = []
     for row in tag.find_all("tr"):
@@ -607,12 +669,18 @@ def table_flowable(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9eef5")),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#aab4c3")),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.4 * scale,
+                    colors.HexColor("#aab4c3"),
+                ),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5 * scale),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5 * scale),
+                ("TOPPADDING", (0, 0), (-1, -1), 4 * scale),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4 * scale),
             ]
         )
     )
@@ -624,6 +692,7 @@ def html_to_flowables(
     image_paths: dict[str, Path],
     styles: dict[str, ParagraphStyle],
     content_width: float,
+    scale: float = 1.0,
 ) -> list[object]:
     soup = BeautifulSoup(content_html, "html.parser")
     story: list[object] = []
@@ -633,7 +702,11 @@ def html_to_flowables(
         path = image_paths.get(source)
         if path:
             story.extend(
-                [Spacer(1, 5), image_flowable(path, content_width), Spacer(1, 7)]
+                [
+                    Spacer(1, 5 * scale),
+                    image_flowable(path, content_width, scale=scale),
+                    Spacer(1, 7 * scale),
+                ]
             )
             alt = str(tag.get("alt", "")).strip()
             if alt:
@@ -679,10 +752,10 @@ def html_to_flowables(
                         ListFlowable(
                             items,
                             bulletType="1" if name == "ol" else "bullet",
-                            leftIndent=22,
+                            leftIndent=22 * scale,
                             bulletFontName="Helvetica",
-                            bulletFontSize=9,
-                            spaceAfter=8,
+                            bulletFontSize=9 * scale,
+                            spaceAfter=8 * scale,
                         )
                     )
             elif name == "pre":
@@ -701,11 +774,19 @@ def html_to_flowables(
                 if caption:
                     story.append(Paragraph(inline_markup(caption), styles["caption"]))
             elif name == "table":
-                table = table_flowable(child, styles, content_width)
+                table = table_flowable(child, styles, content_width, scale)
                 if table:
-                    story.extend([table, Spacer(1, 10)])
+                    story.extend([table, Spacer(1, 10 * scale)])
             elif name == "hr":
-                story.append(HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#aab4c3"), spaceBefore=7, spaceAfter=10))
+                story.append(
+                    HRFlowable(
+                        width="100%",
+                        thickness=0.7 * scale,
+                        color=colors.HexColor("#aab4c3"),
+                        spaceBefore=7 * scale,
+                        spaceAfter=10 * scale,
+                    )
+                )
             elif name not in {"figcaption", "li", "thead", "tbody", "tfoot", "tr", "td", "th"}:
                 visit(child)
 
@@ -741,10 +822,11 @@ def render_pdf(
     include_images: bool,
     temp_root: Path,
     page_size: tuple[float, float] = LETTER,
+    scale: float = 1.0,
 ) -> list[str]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_root.mkdir(parents=True, exist_ok=True)
-    styles = pdf_styles()
+    styles = pdf_styles(scale)
     warnings: list[str] = []
     left_margin = 0.72 * inch
     right_margin = 0.72 * inch
@@ -777,7 +859,9 @@ def render_pdf(
                     image.decompose()
                 content_html = str(soup)
             story.extend(
-                html_to_flowables(content_html, image_paths, styles, content_width)
+                html_to_flowables(
+                    content_html, image_paths, styles, content_width, scale
+                )
             )
 
         document = SimpleDocTemplate(
@@ -865,6 +949,7 @@ def run(args: argparse.Namespace) -> int:
                         include_images=not args.no_images,
                         temp_root=temp_root,
                         page_size=PAGE_SIZES[args.page_size],
+                        scale=args.scale / 100,
                     )
                 all_warnings.extend(warnings)
                 print(f"Created: {output_path}")

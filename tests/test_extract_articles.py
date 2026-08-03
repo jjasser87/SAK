@@ -12,6 +12,7 @@ from articles.extract_articles import (
     extract_article,
     extract_urls_from_text,
     parse_args,
+    pdf_styles,
     render_markdown,
     render_pdf,
 )
@@ -71,8 +72,59 @@ def png_bytes() -> bytes:
 
 class ArticleExtractorTests(unittest.TestCase):
     def test_page_size_argument_is_case_insensitive(self) -> None:
-        args = parse_args(["https://example.com/story", "--page-size", "a4"])
-        self.assertEqual(args.page_size, "A4")
+        for value in ("legal", "gov_legal", "b5"):
+            with self.subTest(page_size=value):
+                args = parse_args(
+                    ["https://example.com/story", "--page-size", value]
+                )
+                self.assertEqual(args.page_size, value.upper())
+
+    def test_scale_argument_accepts_scale_and_zoom_names(self) -> None:
+        scale_args = parse_args(
+            ["https://example.com/story", "--scale", "85"]
+        )
+        zoom_args = parse_args(
+            ["https://example.com/story", "--zoom-scale", "125.5"]
+        )
+
+        self.assertEqual(scale_args.scale, 85)
+        self.assertEqual(zoom_args.scale, 125.5)
+
+    def test_pdf_styles_apply_scale(self) -> None:
+        normal = pdf_styles()
+        enlarged = pdf_styles(1.5)
+
+        self.assertEqual(enlarged["body"].fontSize, normal["body"].fontSize * 1.5)
+        self.assertEqual(enlarged["body"].leading, normal["body"].leading * 1.5)
+        self.assertEqual(enlarged["h2"].spaceAfter, normal["h2"].spaceAfter * 1.5)
+
+    def test_scale_changes_pdf_pagination(self) -> None:
+        article = Article(
+            title="Scale Test",
+            source_url="https://example.com/story",
+            content_html="".join(
+                f"<h2>Section {index}</h2>"
+                "<p>Scaling changes typography, spacing, and pagination in the "
+                "generated document while preserving the physical page size.</p>"
+                for index in range(30)
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            page_counts = []
+            for scale in (0.75, 1.5):
+                output = root / f"article-{scale}.pdf"
+                render_pdf(
+                    [article],
+                    output,
+                    FakeDownloader(png_bytes()),
+                    include_images=False,
+                    temp_root=root / "tmp",
+                    scale=scale,
+                )
+                page_counts.append(len(PdfReader(output).pages))
+
+            self.assertLess(page_counts[0], page_counts[1])
 
     def test_remote_images_argument(self) -> None:
         args = parse_args(["https://example.com/story", "--remote-images"])
@@ -202,7 +254,7 @@ class ArticleExtractorTests(unittest.TestCase):
         article = extract_article(SAMPLE_HTML, "https://example.com/story")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ("LETTER", "A3", "A4", "A5"):
+            for name in ("LETTER", "LEGAL", "GOV_LEGAL", "A4", "B5"):
                 with self.subTest(page_size=name):
                     output = root / f"article-{name}.pdf"
                     render_pdf(
