@@ -2,7 +2,9 @@ import tempfile
 import unittest
 import json
 from pathlib import Path
+from unittest.mock import patch
 
+from bs4 import BeautifulSoup
 from PIL import Image as PillowImage
 from pypdf import PdfReader
 
@@ -11,6 +13,7 @@ from articles.extract_articles import (
     PAGE_SIZES,
     extract_article,
     extract_urls_from_text,
+    normalize_image_source,
     parse_args,
     pdf_styles,
     render_markdown,
@@ -151,6 +154,22 @@ class ArticleExtractorTests(unittest.TestCase):
         self.assertIn("https://example.com/related", article.content_html)
         self.assertNotIn("Unrelated navigation", article.content_html)
 
+    def test_normalize_image_source_preserves_commas_inside_srcset_urls(self) -> None:
+        largest = (
+            "https://media.example.com/photos/id/master/"
+            "w_1600,c_limit/Album-Art.jpg"
+        )
+        image = BeautifulSoup(
+            '<img src="placeholder.jpg" srcset="'
+            "https://media.example.com/photos/id/master/w_120,c_limit/Album-Art.jpg 120w, "
+            f'{largest} 1600w">',
+            "html.parser",
+        ).img
+
+        self.assertEqual(
+            normalize_image_source(image, "https://example.com/article"), largest
+        )
+
     def test_extract_article_recovers_lazy_image_from_embedded_json(self) -> None:
         embedded_html = (
             '<p><img alt="Dungeon Map" '
@@ -178,6 +197,42 @@ class ArticleExtractorTests(unittest.TestCase):
 
         self.assertIn(IGN_IMAGE_URL.replace("&", "&amp;"), article.content_html)
         self.assertNotIn("data:image", article.content_html)
+
+    def test_extract_article_recovers_sections_truncated_by_readability(self) -> None:
+        sections = "".join(
+            f"""
+            <section>
+              <h2>Album {rank}</h2>
+              <p>This is the complete review for ranked album {rank}.</p>
+              <img src="/covers/{rank}.jpg" alt="Album {rank} cover">
+            </section>
+            """
+            for rank in range(8, 0, -1)
+        )
+        page_html = f"""
+        <html>
+          <head><meta property="og:title" content="Eight Best Albums"></head>
+          <body>
+            <nav>Unrelated navigation</nav>
+            <article><h1>Eight Best Albums</h1>{sections}</article>
+          </body>
+        </html>
+        """
+        truncated_html = """
+        <div>
+          <h2>Album 8</h2><p>This is the complete review for ranked album 8.</p>
+          <h2>Album 7</h2><p>This is the complete review for ranked album 7.</p>
+        </div>
+        """
+
+        with patch("articles.extract_articles.Document") as document_class:
+            document_class.return_value.summary.return_value = truncated_html
+            article = extract_article(page_html, "https://example.com/best-albums")
+
+        self.assertEqual(article.content_html.count("<h2>"), 8)
+        self.assertIn("complete review for ranked album 1", article.content_html)
+        self.assertIn("https://example.com/covers/1.jpg", article.content_html)
+        self.assertNotIn("Unrelated navigation", article.content_html)
 
     def test_render_markdown_downloads_image_into_assets_folder(self) -> None:
         article = extract_article(SAMPLE_HTML, "https://example.com/story")

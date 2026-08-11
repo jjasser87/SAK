@@ -258,7 +258,11 @@ def normalize_image_source(tag: Tag, base_url: str) -> str | None:
 
     srcset = tag.get("data-srcset") or tag.get("srcset")
     if srcset:
-        entries = [part.strip().split()[0] for part in str(srcset).split(",") if part.strip()]
+        entries = [
+            part.strip().rsplit(maxsplit=1)[0]
+            for part in re.split(r",\s+(?=\S)", str(srcset))
+            if part.strip()
+        ]
         if entries:
             source = entries[-1]
 
@@ -307,12 +311,52 @@ def embedded_image_sources(soup: BeautifulSoup, base_url: str) -> dict[str, str]
     return sources
 
 
+def normalized_section_headings(soup: BeautifulSoup | Tag) -> list[str]:
+    return [
+        re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).casefold()
+        for heading in soup.select("h2, h3, h4, h5, h6")
+        if heading.get_text(" ", strip=True)
+    ]
+
+
+def recover_truncated_article(
+    original: BeautifulSoup, readable: BeautifulSoup
+) -> BeautifulSoup:
+    """Use a complete article element when readability drops most sections.
+
+    Readability occasionally selects only the first chunk of a long ranked list even
+    though the server-rendered page contains the entire article. Keep its output by
+    default, and fall back only when one unambiguous article element contains several
+    section headings that are demonstrably absent from the readable result.
+    """
+    article_elements = original.find_all("article")
+    if len(article_elements) != 1:
+        return readable
+
+    candidate = article_elements[0]
+    candidate_headings = normalized_section_headings(candidate)
+    if len(candidate_headings) < 4:
+        return readable
+
+    readable_headings = set(normalized_section_headings(readable))
+    preserved_headings = sum(
+        heading in readable_headings for heading in candidate_headings
+    )
+    missing_headings = len(candidate_headings) - preserved_headings
+    heading_coverage = preserved_headings / len(candidate_headings)
+    if missing_headings < 3 or heading_coverage >= 0.75:
+        return readable
+
+    return BeautifulSoup(str(candidate), "html.parser")
+
+
 def extract_article(page_html: str, source_url: str) -> Article:
     original = BeautifulSoup(page_html, "html.parser")
     recovered_images = embedded_image_sources(original, source_url)
     document = Document(page_html, url=source_url)
     readable_html = document.summary(html_partial=True)
     content = BeautifulSoup(readable_html, "html.parser")
+    content = recover_truncated_article(original, content)
 
     for image_button in content.select("button:has(img)"):
         image_button.unwrap()
