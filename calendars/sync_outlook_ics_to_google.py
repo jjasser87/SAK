@@ -357,6 +357,15 @@ def find_google_event(service: Any, calendar_id: str, ical_uid: str) -> dict[str
     return items[0] if items else None
 
 
+def is_synced_google_event(event: dict[str, Any]) -> bool:
+    return (
+        event.get("extendedProperties", {})
+        .get("private", {})
+        .get(SYNC_SOURCE_KEY)
+        == SYNC_SOURCE_VALUE
+    )
+
+
 def list_synced_google_events(service: Any, calendar_id: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     page_token = None
@@ -385,6 +394,14 @@ def sync_event(service: Any, calendar_id: str, event: dict[str, Any], dry_run: b
         if not dry_run:
             service.events().import_(calendarId=calendar_id, body=event).execute()
         return "created"
+
+    if not is_synced_google_event(existing):
+        print(
+            "Skipping Outlook event because its iCalendar UID already belongs to "
+            f"a Google event not created by this sync: {event.get('summary', '(No title)')} "
+            f"({event['iCalUID']})"
+        )
+        return "skipped"
 
     old_hash = (
         existing.get("extendedProperties", {})
@@ -432,7 +449,7 @@ def main() -> int:
         events = outlook_events(ics_bytes, time_zone)
         service = google_calendar_service(Path(args.credentials), Path(args.token))
 
-        counts = {"created": 0, "updated": 0, "unchanged": 0}
+        counts = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
         for event in events:
             result = sync_event(service, args.calendar_id, event, args.dry_run)
             counts[result] += 1
@@ -450,7 +467,8 @@ def main() -> int:
         print(
             f"{prefix}{len(events)} Outlook events processed; "
             f"{counts['created']} created, {counts['updated']} updated, "
-            f"{counts['unchanged']} unchanged, {deleted} deleted."
+            f"{counts['unchanged']} unchanged, {counts['skipped']} skipped, "
+            f"{deleted} deleted."
         )
         return 0
     except Exception as exc:
