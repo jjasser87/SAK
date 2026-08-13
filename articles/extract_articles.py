@@ -100,6 +100,49 @@ PAGE_SIZES = {
     "B6": B6,
     "B7": B7,
 }
+CUSTOM_PAGE_SIZE_RE = re.compile(
+    r"^\s*(\d+(?:\.\d+)?)\s*(?:in(?:ches?)?\.?)?\s*[x×]\s*"
+    r"(\d+(?:\.\d+)?)\s*(?:in(?:ches?)?\.?)?\s*$",
+    re.IGNORECASE,
+)
+MIN_CUSTOM_PAGE_INCHES = 2.0
+MAX_CUSTOM_PAGE_INCHES = 200.0
+MIN_USABLE_PAGE_INCHES = 0.5
+DEFAULT_MARGIN_TOP_INCHES = 0.7
+DEFAULT_MARGIN_OTHER_INCHES = 0.72
+
+
+def page_size_name_or_dimensions(value: str) -> str:
+    name = value.strip().upper()
+    if name in PAGE_SIZES:
+        return name
+
+    match = CUSTOM_PAGE_SIZE_RE.fullmatch(value)
+    if not match:
+        raise argparse.ArgumentTypeError(
+            "page size must be a named size or WIDTHxHEIGHT in inches, such as 6.5x9"
+        )
+
+    width, height = (float(dimension) for dimension in match.groups())
+    if not all(
+        MIN_CUSTOM_PAGE_INCHES <= dimension <= MAX_CUSTOM_PAGE_INCHES
+        for dimension in (width, height)
+    ):
+        raise argparse.ArgumentTypeError(
+            "custom page width and height must each be between 2 and 200 inches"
+        )
+    return f"{width:g}x{height:g}"
+
+
+def resolve_page_size(value: str) -> tuple[float, float]:
+    normalized = page_size_name_or_dimensions(value)
+    if normalized in PAGE_SIZES:
+        return PAGE_SIZES[normalized]
+
+    match = CUSTOM_PAGE_SIZE_RE.fullmatch(normalized)
+    assert match is not None
+    width, height = (float(dimension) for dimension in match.groups())
+    return width * inch, height * inch
 
 
 def scale_percentage(value: str) -> float:
@@ -112,6 +155,16 @@ def scale_percentage(value: str) -> float:
     return percentage
 
 
+def margin_inches(value: str) -> float:
+    try:
+        margin = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("margin must be a number in inches") from exc
+    if not 0 <= margin <= MAX_CUSTOM_PAGE_INCHES:
+        raise argparse.ArgumentTypeError("margin must be between 0 and 200 inches")
+    return margin
+
+
 @dataclass(frozen=True)
 class Article:
     title: str
@@ -120,6 +173,55 @@ class Article:
     byline: str | None = None
     published: str | None = None
     site_name: str | None = None
+
+
+@dataclass(frozen=True)
+class PDFMargins:
+    top: float
+    right: float
+    bottom: float
+    left: float
+
+
+DEFAULT_PDF_MARGINS = PDFMargins(
+    top=DEFAULT_MARGIN_TOP_INCHES * inch,
+    right=DEFAULT_MARGIN_OTHER_INCHES * inch,
+    bottom=DEFAULT_MARGIN_OTHER_INCHES * inch,
+    left=DEFAULT_MARGIN_OTHER_INCHES * inch,
+)
+
+
+def resolve_pdf_margins(args: argparse.Namespace) -> PDFMargins:
+    uniform = args.margin
+
+    def side_margin(side: str, default: float) -> float:
+        value = getattr(args, f"margin_{side}")
+        if value is None:
+            value = uniform if uniform is not None else default
+        return value * inch
+
+    return PDFMargins(
+        top=side_margin("top", DEFAULT_MARGIN_TOP_INCHES),
+        right=side_margin("right", DEFAULT_MARGIN_OTHER_INCHES),
+        bottom=side_margin("bottom", DEFAULT_MARGIN_OTHER_INCHES),
+        left=side_margin("left", DEFAULT_MARGIN_OTHER_INCHES),
+    )
+
+
+def validate_pdf_layout(
+    page_size: tuple[float, float], margins: PDFMargins
+) -> None:
+    minimum = MIN_USABLE_PAGE_INCHES * inch
+    if page_size[0] - margins.left - margins.right < minimum:
+        raise ValueError(
+            f"PDF margins must leave at least {MIN_USABLE_PAGE_INCHES:g} inches "
+            "of usable page width"
+        )
+    if page_size[1] - margins.top - margins.bottom < minimum:
+        raise ValueError(
+            f"PDF margins must leave at least {MIN_USABLE_PAGE_INCHES:g} inches "
+            "of usable page height"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -161,10 +263,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--page-size",
-        type=str.upper,
-        choices=PAGE_SIZES,
+        type=page_size_name_or_dimensions,
         default="LETTER",
-        help="PDF print size. Defaults to LETTER.",
+        metavar="SIZE",
+        help=(
+            "PDF print size: a named size or custom WIDTHxHEIGHT in inches "
+            "(for example, 6.5x9). Defaults to LETTER."
+        ),
     )
     parser.add_argument(
         "--scale",
@@ -174,6 +279,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=100.0,
         metavar="PERCENT",
         help="PDF content scale from 25 to 200 percent. Defaults to 100.",
+    )
+    parser.add_argument(
+        "--margin",
+        type=margin_inches,
+        metavar="INCHES",
+        help=(
+            "Set all PDF margins in inches. Per-side margin options override "
+            "this value."
+        ),
+    )
+    parser.add_argument(
+        "--margin-top",
+        type=margin_inches,
+        metavar="INCHES",
+        help="Override the PDF top margin in inches.",
+    )
+    parser.add_argument(
+        "--margin-right",
+        type=margin_inches,
+        metavar="INCHES",
+        help="Override the PDF right margin in inches.",
+    )
+    parser.add_argument(
+        "--margin-bottom",
+        type=margin_inches,
+        metavar="INCHES",
+        help="Override the PDF bottom margin in inches.",
+    )
+    parser.add_argument(
+        "--margin-left",
+        type=margin_inches,
+        metavar="INCHES",
+        help="Override the PDF left margin in inches.",
     )
     parser.add_argument(
         "--timeout",
@@ -186,7 +324,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=USER_AGENT,
         help="HTTP User-Agent header used to fetch pages and images.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    try:
+        validate_pdf_layout(resolve_page_size(args.page_size), resolve_pdf_margins(args))
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def is_http_url(value: str) -> bool:
@@ -839,21 +982,26 @@ def html_to_flowables(
 
 
 def page_footer(canvas, document) -> None:
+    if document.bottomMargin < 0.5 * inch:
+        return
+
     page_width, _ = document.pagesize
+    rule_height = document.bottomMargin - 0.19 * inch
+    text_height = document.bottomMargin - 0.38 * inch
     canvas.saveState()
     canvas.setStrokeColor(colors.HexColor("#d4dae3"))
     canvas.setLineWidth(0.4)
     canvas.line(
         document.leftMargin,
-        0.53 * inch,
+        rule_height,
         page_width - document.rightMargin,
-        0.53 * inch,
+        rule_height,
     )
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#687386"))
     canvas.drawRightString(
         page_width - document.rightMargin,
-        0.34 * inch,
+        text_height,
         f"Page {document.page}",
     )
     canvas.restoreState()
@@ -867,14 +1015,14 @@ def render_pdf(
     temp_root: Path,
     page_size: tuple[float, float] = LETTER,
     scale: float = 1.0,
+    margins: PDFMargins = DEFAULT_PDF_MARGINS,
 ) -> list[str]:
+    validate_pdf_layout(page_size, margins)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_root.mkdir(parents=True, exist_ok=True)
     styles = pdf_styles(scale)
     warnings: list[str] = []
-    left_margin = 0.72 * inch
-    right_margin = 0.72 * inch
-    content_width = page_size[0] - left_margin - right_margin
+    content_width = page_size[0] - margins.left - margins.right
 
     with tempfile.TemporaryDirectory(prefix=f"{output_path.stem}-", dir=temp_root) as temp_dir:
         story: list[object] = []
@@ -911,10 +1059,10 @@ def render_pdf(
         document = SimpleDocTemplate(
             str(output_path),
             pagesize=page_size,
-            rightMargin=right_margin,
-            leftMargin=left_margin,
-            topMargin=0.7 * inch,
-            bottomMargin=0.72 * inch,
+            rightMargin=margins.right,
+            leftMargin=margins.left,
+            topMargin=margins.top,
+            bottomMargin=margins.bottom,
             title=articles[0].title if len(articles) == 1 else output_path.stem,
             author="Swiss Army Knife Article Extractor",
         )
@@ -992,8 +1140,9 @@ def run(args: argparse.Namespace) -> int:
                         downloader,
                         include_images=not args.no_images,
                         temp_root=temp_root,
-                        page_size=PAGE_SIZES[args.page_size],
+                        page_size=resolve_page_size(args.page_size),
                         scale=args.scale / 100,
+                        margins=resolve_pdf_margins(args),
                     )
                 all_warnings.extend(warnings)
                 print(f"Created: {output_path}")

@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from articles.extract_articles import (
     Article,
     PAGE_SIZES,
+    PDFMargins,
     extract_article,
     extract_urls_from_text,
     normalize_image_source,
@@ -18,6 +19,8 @@ from articles.extract_articles import (
     pdf_styles,
     render_markdown,
     render_pdf,
+    resolve_pdf_margins,
+    resolve_page_size,
 )
 
 
@@ -82,6 +85,20 @@ class ArticleExtractorTests(unittest.TestCase):
                 )
                 self.assertEqual(args.page_size, value.upper())
 
+    def test_page_size_argument_accepts_custom_inches(self) -> None:
+        for value in ("6.5x9", "6.5 in x 9 in", "6.5×9"):
+            with self.subTest(page_size=value):
+                args = parse_args(
+                    ["https://example.com/story", "--page-size", value]
+                )
+                self.assertEqual(args.page_size, "6.5x9")
+
+    def test_page_size_argument_rejects_invalid_custom_dimensions(self) -> None:
+        for value in ("6.5", "wide-by-tall", "1x9", "6x201"):
+            with self.subTest(page_size=value):
+                with patch("sys.stderr"), self.assertRaises(SystemExit):
+                    parse_args(["https://example.com/story", "--page-size", value])
+
     def test_scale_argument_accepts_scale_and_zoom_names(self) -> None:
         scale_args = parse_args(
             ["https://example.com/story", "--scale", "85"]
@@ -92,6 +109,47 @@ class ArticleExtractorTests(unittest.TestCase):
 
         self.assertEqual(scale_args.scale, 85)
         self.assertEqual(zoom_args.scale, 125.5)
+
+    def test_margin_argument_accepts_uniform_and_per_side_values(self) -> None:
+        args = parse_args(
+            [
+                "https://example.com/story",
+                "--margin",
+                "0.5",
+                "--margin-top",
+                "0.75",
+                "--margin-left",
+                "1",
+            ]
+        )
+        margins = resolve_pdf_margins(args)
+
+        self.assertEqual(margins.top, 0.75 * 72)
+        self.assertEqual(margins.right, 0.5 * 72)
+        self.assertEqual(margins.bottom, 0.5 * 72)
+        self.assertEqual(margins.left, 1 * 72)
+
+    def test_margin_defaults_preserve_existing_layout(self) -> None:
+        args = parse_args(["https://example.com/story"])
+        margins = resolve_pdf_margins(args)
+
+        self.assertEqual(margins.top, 0.7 * 72)
+        self.assertEqual(margins.right, 0.72 * 72)
+        self.assertEqual(margins.bottom, 0.72 * 72)
+        self.assertEqual(margins.left, 0.72 * 72)
+
+    def test_margin_argument_rejects_invalid_or_incompatible_values(self) -> None:
+        cases = (
+            ("--margin", "not-a-number"),
+            ("--margin", "-0.1"),
+            ("--margin-left", "8"),
+        )
+        for option, value in cases:
+            with self.subTest(option=option, value=value):
+                with patch("sys.stderr"), self.assertRaises(SystemExit):
+                    parse_args(
+                        ["https://example.com/story", option, value]
+                    )
 
     def test_pdf_styles_apply_scale(self) -> None:
         normal = pdf_styles()
@@ -327,6 +385,47 @@ class ArticleExtractorTests(unittest.TestCase):
                     self.assertAlmostEqual(
                         float(page.mediabox.height), PAGE_SIZES[name][1], places=2
                     )
+
+    def test_render_pdf_uses_custom_page_size_in_inches(self) -> None:
+        article = extract_article(SAMPLE_HTML, "https://example.com/story")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "article-custom.pdf"
+            custom_page_size = resolve_page_size("6.5x9")
+            custom_margins = PDFMargins(top=36, right=36, bottom=36, left=36)
+            render_pdf(
+                [article],
+                output,
+                FakeDownloader(png_bytes()),
+                include_images=True,
+                temp_root=root / "tmp",
+                page_size=custom_page_size,
+                margins=custom_margins,
+            )
+            page = PdfReader(output).pages[0]
+            self.assertAlmostEqual(float(page.mediabox.width), 6.5 * 72, places=2)
+            self.assertAlmostEqual(float(page.mediabox.height), 9 * 72, places=2)
+
+    def test_render_pdf_applies_custom_margins(self) -> None:
+        article = extract_article(SAMPLE_HTML, "https://example.com/story")
+        margins = PDFMargins(top=36, right=45, bottom=54, left=63)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("articles.extract_articles.SimpleDocTemplate") as template:
+                render_pdf(
+                    [article],
+                    root / "article-margins.pdf",
+                    FakeDownloader(png_bytes()),
+                    include_images=False,
+                    temp_root=root / "tmp",
+                    margins=margins,
+                )
+
+        _, kwargs = template.call_args
+        self.assertEqual(kwargs["topMargin"], margins.top)
+        self.assertEqual(kwargs["rightMargin"], margins.right)
+        self.assertEqual(kwargs["bottomMargin"], margins.bottom)
+        self.assertEqual(kwargs["leftMargin"], margins.left)
 
     def test_failed_pdf_image_download_adds_clickable_source_link(self) -> None:
         article = Article(

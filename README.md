@@ -68,6 +68,15 @@ and `.txt`, `.md`, or `.markdown` files containing bare URLs or Markdown links.
   ```bash
   python articles/extract_articles.py urls.txt --format pdf --page-size LEGAL --scale 90
   ```
+- **Use custom PDF dimensions in inches**:
+  ```bash
+  python articles/extract_articles.py urls.txt --format pdf --page-size 6.5x9
+  ```
+- **Set uniform margins with a larger inside/left margin**:
+  ```bash
+  python articles/extract_articles.py urls.txt --format pdf \
+    --margin 0.5 --margin-left 0.75
+  ```
 - **Several inputs into one Markdown file and one PDF**:
   ```bash
   python articles/extract_articles.py \
@@ -99,9 +108,16 @@ challenges may need a browser-based workflow instead.
 PDF output defaults to Letter size. Use `--page-size` with `LETTER`, `HALF_LETTER`,
 `LEGAL`, `GOV_LETTER`, `GOV_LEGAL`, `JUNIOR_LEGAL`, `TABLOID`, `LEDGER`,
 `EXECUTIVE`, `A0` through `A7`, or `B0` through `B7`. Values are case-insensitive,
-so `--page-size b5` is valid. Use `--scale PERCENT` (also `--zoom` or
-`--zoom-scale`) to size PDF content from 25% to 200%; the paper dimensions do
-not change.
+so `--page-size b5` is valid. For a custom size, pass width first and height
+second in inches, such as `--page-size 6.5x9` or `--page-size "6.5 in x 9 in"`.
+Each custom dimension must be from 2 to 200 inches. Use `--scale PERCENT` (also
+`--zoom` or `--zoom-scale`) to size PDF content from 25% to 200%; the paper
+dimensions do not change. Use `--margin INCHES` to set all four PDF margins.
+`--margin-top`, `--margin-right`, `--margin-bottom`, and `--margin-left` can
+override individual sides. If no margin options are supplied, the existing
+defaults remain in effect: 0.70 inches on top and 0.72 inches on the other sides.
+The page-number footer is omitted when the bottom margin is below 0.5 inches so
+it cannot overlap the article content.
 
 ## Requirements
 
