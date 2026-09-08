@@ -462,6 +462,37 @@ def normalized_section_headings(soup: BeautifulSoup | Tag) -> list[str]:
     ]
 
 
+def remove_article_clutter(content: BeautifulSoup) -> None:
+    """Remove explicitly marked page furniture, not prose matching keywords."""
+    for image_button in content.select("button:has(img)"):
+        image_button.unwrap()
+
+    selectors = (
+        "script, style, nav, form, button, noscript, iframe, canvas, footer, "
+        '[role="navigation"], [role="banner"], [role="contentinfo"], '
+        ".content-sidebar, .content-topics, .topic-list, .native-share, "
+        ".social-share, .share-buttons, .newsletter-signup, .related-articles, "
+        ".related-posts, .advertisement, .ad-slot, .republish, "
+        ".react-content-related-container"
+    )
+    for unwanted in list(content.select(selectors)):
+        # A selected ancestor may already have removed this descendant.
+        if unwanted.parent is not None:
+            unwanted.decompose()
+
+
+def explicit_article_body(original: BeautifulSoup) -> Tag | None:
+    """Prefer an unambiguous publisher-marked body over the whole article shell."""
+    candidates = original.select('[itemprop~="articleBody"]')
+    candidates = [
+        candidate for candidate in candidates
+        if candidate.name not in {"meta", "script"}
+        and candidate.find(["p", "h2", "h3", "ul", "ol", "figure", "table"])
+        and candidate.get_text(" ", strip=True)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def recover_truncated_article(
     original: BeautifulSoup, readable: BeautifulSoup
 ) -> BeautifulSoup:
@@ -497,15 +528,19 @@ def extract_article(page_html: str, source_url: str) -> Article:
     original = BeautifulSoup(page_html, "html.parser")
     recovered_images = embedded_image_sources(original, source_url)
     document = Document(page_html, url=source_url)
-    readable_html = document.summary(html_partial=True)
-    content = BeautifulSoup(readable_html, "html.parser")
-    content = recover_truncated_article(original, content)
+    cleaned = BeautifulSoup(page_html, "html.parser")
+    remove_article_clutter(cleaned)
+    body = explicit_article_body(cleaned)
+    if body is not None:
+        content = BeautifulSoup(str(body), "html.parser")
+    else:
+        readable_html = Document(str(cleaned), url=source_url).summary(html_partial=True)
+        content = BeautifulSoup(readable_html, "html.parser")
+        # Count headings only after removing unrelated sidebar/promo sections.
+        remove_article_clutter(content)
+        content = recover_truncated_article(cleaned, content)
 
-    for image_button in content.select("button:has(img)"):
-        image_button.unwrap()
-
-    for unwanted in content.select("script, style, nav, form, button, noscript, iframe, canvas"):
-        unwanted.decompose()
+    remove_article_clutter(content)
 
     for link in content.find_all("a", href=True):
         link["href"] = urljoin(source_url, str(link["href"]))

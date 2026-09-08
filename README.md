@@ -105,6 +105,13 @@ JSON page data when the readable HTML contains only placeholders. It works on se
 article HTML; pages that require JavaScript execution, authentication, or anti-bot
 challenges may need a browser-based workflow instead.
 
+Extraction prefers a single publisher-marked `articleBody` when available, otherwise
+uses readability with recovery for truncated articles. Marked navigation, sidebars,
+topic lists, sharing controls, and promotional blocks are removed before recovery.
+Article paragraphs, section headings, inline links, figures, and captions are retained;
+the title and available source metadata remain above the body. Unmarked page furniture
+may still require additional site-specific cleanup.
+
 PDF output defaults to Letter size. Use `--page-size` with `LETTER`, `HALF_LETTER`,
 `LEGAL`, `GOV_LETTER`, `GOV_LEGAL`, `JUNIOR_LEGAL`, `TABLOID`, `LEDGER`,
 `EXECUTIVE`, `A0` through `A7`, or `B0` through `B7`. Values are case-insensitive,

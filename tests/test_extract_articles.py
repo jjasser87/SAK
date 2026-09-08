@@ -292,6 +292,94 @@ class ArticleExtractorTests(unittest.TestCase):
         self.assertIn("https://example.com/covers/1.jpg", article.content_html)
         self.assertNotIn("Unrelated navigation", article.content_html)
 
+    def test_explicit_body_excludes_conversation_page_furniture(self) -> None:
+        # Synthetic fixture matching the inspected Conversation page structure.
+        page_html = """
+        <html><head><meta property="og:title" content="AI hallucinations">
+        <meta name="author" content="Example Author"></head><body><article>
+        <h1>AI hallucinations</h1>
+        <figure><img src="/decorative-hero.jpg"></figure>
+        <div class="content-body entry-content" itemprop="articleBody">
+          <p>Opening explanation with an <a href="/research">inline citation</a>.</p>
+          <h2>Making it up</h2><p>Important first section.</p>
+          <div class="newsletter-signup"><h3>Subscribe</h3><p>Promotion.</p></div>
+          <h2>What causes hallucinations</h2>
+          <figure><button><img data-src="/diagram.png" alt="Useful diagram"></button>
+          <figcaption>Diagram explanation and credit.</figcaption></figure>
+          <h2>What’s at risk</h2><p>Important risks.</p>
+          <h2>Check AI’s work</h2><p>The complete final paragraph.</p>
+        </div>
+        <div class="topic-list"><h3>Topics</h3><ul><li>AI tags</li></ul></div>
+        <aside class="content-sidebar"><h3>Authors</h3><p>Author biography.</p>
+          <img src="/author.jpg"><h3>Disclosure statement</h3><p>Disclosure.</p>
+          <h3>Partners</h3><h3>Languages</h3><h3>DOI</h3></aside>
+        </article><footer>Site footer</footer></body></html>
+        """
+        article = extract_article(page_html, "https://example.com/story")
+        body = BeautifulSoup(article.content_html, "html.parser")
+        self.assertEqual(len(body.select("h2")), 4)
+        self.assertIn("The complete final paragraph.", body.get_text())
+        self.assertIn("Diagram explanation and credit.", body.get_text())
+        self.assertEqual(body.img["src"], "https://example.com/diagram.png")
+        self.assertEqual(len(body.select("img")), 1)
+        self.assertEqual(body.a["href"], "https://example.com/research")
+        self.assertEqual(article.byline, "Example Author")
+        for clutter in ("Topics", "Authors", "Disclosure", "Partners", "Languages",
+                        "DOI", "Subscribe", "Promotion", "Site footer"):
+            self.assertNotIn(clutter, body.get_text())
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "clean.md"
+            render_markdown([article], output, FakeDownloader(png_bytes()),
+                            include_images=True, download_images=False)
+            markdown = output.read_text()
+            self.assertIn("The complete final paragraph.", markdown)
+            self.assertNotIn("Author biography", markdown)
+            self.assertNotIn("Promotion", markdown)
+
+    def test_sidebar_headings_do_not_trigger_full_article_recovery(self) -> None:
+        page_html = """
+        <html><head><meta property="og:title" content="A story"></head><body>
+        <article><div><h2>Story section</h2><p>Keep the article prose.</p></div>
+        <div>Unmarked surrounding junk must not be restored.</div>
+        <aside class="content-sidebar"><h3>Authors</h3><h3>Partners</h3>
+        <h3>Languages</h3><h3>Disclosure</h3></aside></article></body></html>
+        """
+        readable = "<div><h2>Story section</h2><p>Keep the article prose.</p></div>"
+        with patch("articles.extract_articles.Document") as document_class:
+            document_class.return_value.summary.return_value = readable
+            article = extract_article(page_html, "https://example.com/story")
+        self.assertIn("Keep the article prose.", article.content_html)
+        self.assertNotIn("surrounding junk", article.content_html)
+
+    def test_recovery_removes_promos_but_preserves_editorial_asides(self) -> None:
+        sections = "".join(f"<h2>Section {i}</h2><p>Full section {i}.</p>"
+                           for i in range(6))
+        page_html = f"""<html><head><meta property="og:title" content="Story"></head>
+        <body><article>{sections}
+        <aside><p>Editorial context about newsletters and related articles.</p></aside>
+        <div class="related-articles"><h2>Suggested reading</h2><p>Other story.</p></div>
+        <footer>Share this story.</footer></article></body></html>"""
+        with patch("articles.extract_articles.Document") as document_class:
+            document_class.return_value.summary.return_value = "<p>Full section 0.</p>"
+            article = extract_article(page_html, "https://example.com/story")
+        self.assertEqual(article.content_html.count("<h2>"), 6)
+        self.assertIn("Editorial context", article.content_html)
+        self.assertNotIn("Other story", article.content_html)
+        self.assertNotIn("Share this story", article.content_html)
+
+    def test_empty_or_ambiguous_explicit_body_uses_readability(self) -> None:
+        for marker in ('<div itemprop="articleBody"></div>',
+                       '<meta itemprop="articleBody" content="Summary">',
+                       '<div itemprop="articleBody"><p>First story</p></div>'
+                       '<div itemprop="articleBody"><p>Second story</p></div>'):
+            with self.subTest(marker=marker):
+                page_html = '<head><meta property="og:title" content="Story"></head>' + marker
+                with patch("articles.extract_articles.Document") as document_class:
+                    document_class.return_value.summary.return_value = "<p>Selected story.</p>"
+                    article = extract_article(page_html, "https://example.com/story")
+                self.assertIn("Selected story.", article.content_html)
+
     def test_render_markdown_downloads_image_into_assets_folder(self) -> None:
         article = extract_article(SAMPLE_HTML, "https://example.com/story")
         with tempfile.TemporaryDirectory() as directory:
