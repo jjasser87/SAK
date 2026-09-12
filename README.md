@@ -54,6 +54,18 @@ Converts `.R` scripts to paginated `.pdf` files by laying out the source code in
   - `python converters/convert_r_to_pdf.py <filename>.R` (converts a specific file)
 - **Dependency**: Requires `reportlab`.
 
+### 5. `combine_images_to_pdf.py`
+Combines the images in a folder into one PDF, with one image per page.
+- **Usage**:
+  - `python converters/combine_images_to_pdf.py "/path/to/images"` (creates `/path/to/images/images.pdf`)
+  - `python converters/combine_images_to_pdf.py "/path/to/images" -o album.pdf`
+  - `python converters/combine_images_to_pdf.py "/path/to/images" --recursive` (includes subfolders)
+  - Add `--overwrite` to replace an existing output PDF.
+- **Ordering**: Natural, case-insensitive filename order (`image2` before `image10`); recursive mode sorts by relative path.
+- **Images**: Accepts readable image extensions supported by the installed Pillow, including JPEG, PNG, BMP, GIF, TIFF, and WebP. Other files are ignored. Animated images and multi-page TIFFs use their first frame only. A corrupt or unreadable image stops conversion with an error and leaves any existing PDF intact.
+- **Pages**: Each page matches its image dimensions at 72 pixels per inch, with EXIF orientation applied and transparent areas rendered on white. Subfolders are excluded unless `--recursive` is supplied. The output's parent folder must already exist.
+- **Dependencies**: Requires `Pillow` and `reportlab` (both in `requirements.txt`).
+
 ## Article Extractor
 
 `articles/extract_articles.py` downloads web pages, isolates the readable article body,
