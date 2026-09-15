@@ -352,6 +352,44 @@ class ArticleExtractorTests(unittest.TestCase):
         self.assertIn("Keep the article prose.", article.content_html)
         self.assertNotIn("surrounding junk", article.content_html)
 
+    def test_sidebar_layout_class_does_not_remove_document_body(self) -> None:
+        # Genesis/PowerPyx uses content-sidebar on body as a layout class.
+        # Exercise both readability and the explicit article-body route.
+        for marker in ('itemprop="text"', 'itemprop="articleBody"'):
+            with self.subTest(marker=marker):
+                sections = "".join(
+                    f'<h2>Area {i}</h2><p>Collectible {i} is at the end of '
+                    f'the corridor. Follow the path and open the box.</p>'
+                    f'<p><a href="/map-{i}.jpg"><img src="/map-{i}.jpg"></a></p>'
+                    for i in range(3)
+                )
+                page_html = f"""
+                <html><head><title>Collectible locations</title></head>
+                <body class="single content-sidebar">
+                  <nav>Site navigation</nav>
+                  <main><article><header><h1>Collectible locations</h1></header>
+                    <div class="entry-content" {marker}>
+                      <p>Opening walkthrough explaining where to find all the
+                      collectibles, including the boxes and maps for each area.</p>
+                      {sections}
+                    </div><footer>Filed under games</footer>
+                  </article></main>
+                  <aside class="content-sidebar"><h3>Sidebar promotion</h3>
+                    <p>Unrelated reading.</p><img src="/sidebar.jpg"></aside>
+                </body></html>
+                """
+                article = extract_article(page_html, "https://example.com/guide")
+                body = BeautifulSoup(article.content_html, "html.parser")
+                self.assertIn("Opening walkthrough", body.get_text())
+                self.assertEqual([h.get_text() for h in body.select("h2")],
+                                 [f"Area {i}" for i in range(3)])
+                self.assertIn("Collectible 2", body.get_text())
+                self.assertEqual([img["src"] for img in body.select("img")],
+                                 [f"https://example.com/map-{i}.jpg" for i in range(3)])
+                for clutter in ("Site navigation", "Sidebar promotion",
+                                "Unrelated reading", "Filed under games"):
+                    self.assertNotIn(clutter, body.get_text())
+
     def test_recovery_removes_promos_but_preserves_editorial_asides(self) -> None:
         sections = "".join(f"<h2>Section {i}</h2><p>Full section {i}.</p>"
                            for i in range(6))

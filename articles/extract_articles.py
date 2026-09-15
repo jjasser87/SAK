@@ -476,6 +476,10 @@ def remove_article_clutter(content: BeautifulSoup) -> None:
         ".react-content-related-container"
     )
     for unwanted in list(content.select(selectors)):
+        # Site-wide layout classes (e.g. Genesis's body.content-sidebar) can
+        # match clutter selectors without identifying a removable content block.
+        if unwanted.name in {"html", "body"}:
+            continue
         # A selected ancestor may already have removed this descendant.
         if unwanted.parent is not None:
             unwanted.decompose()
