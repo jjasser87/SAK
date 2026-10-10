@@ -9,3 +9,4 @@ markdownify
 readability-lxml
 requests
 pypdf
+PyMuPDF>=1.24.9

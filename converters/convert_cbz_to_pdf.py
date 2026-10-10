@@ -52,7 +52,7 @@ def edge_profile(image, right=False):
             return [strip.getpixel((0, row)) for row in range(256)], variation
 
 
-def detect_spreads(archive, images, threshold=0.08, progress=None):
+def detect_spreads(archive, images, threshold=0.08, progress=None, right_to_left=False):
     """Find matching adjacent portrait edges; reject blank and ambiguous seams.
 
     This is a visual heuristic, not knowledge of a book, filename, or page parity.
@@ -76,8 +76,10 @@ def detect_spreads(archive, images, threshold=0.08, progress=None):
         except Exception as exc:
             raise ValueError(f"Could not inspect {entry.filename}: {exc}") from exc
         if previous is not None and current is not None:
-            aspect, (left, left_variation), _ = current
-            old_aspect, _, (right, right_variation) = previous
+            aspect = current[0]
+            old_aspect = previous[0]
+            left, left_variation = current[2 if right_to_left else 1]
+            right, right_variation = previous[1 if right_to_left else 2]
             if min(left_variation, right_variation) >= 0.04 and abs(aspect / old_aspect - 1) <= 0.2:
                 differences = [sum(abs(a - b) for a, b in zip(l, r)) / (3 * 255)
                                for l, r in zip(left, right)]
@@ -130,6 +132,57 @@ def read_page(archive, entry, temporary_dir):
         raise ValueError(f"Could not convert {entry.filename}: {exc}") from exc
 
 
+def write_image_pdf(archive, images, output, title, overwrite=False, spreads=None,
+                    spread_threshold=0.08, progress=None, right_to_left=False):
+    """Render ordered archive images using the shared portrait/spread layout."""
+    starts = (detect_spreads(archive, images, spread_threshold, progress, right_to_left)
+              if spreads is None else spread_starts(spreads, len(images)))
+    if progress:
+        pairs = ",".join(f"{start}-{start + 1}" for start in sorted(starts)) or "none"
+        progress(f"{'Detected' if spreads is None else 'Selected'} spreads: {pairs}")
+    with tempfile.NamedTemporaryFile(
+        dir=output.parent, prefix=f".{output.stem}-", suffix=".pdf", delete=False
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        pdf = canvas.Canvas(str(temporary_path))
+        pdf.setTitle(title)
+        index = 0
+        page_count = 0
+        while index < len(images):
+            group_size = 2 if index + 1 in starts else 1
+            with ExitStack() as resources:
+                pages = [resources.enter_context(read_page(archive, entry, output.parent))
+                         for entry in images[index:index + group_size]]
+                width, height = pages[0][0].size
+                if right_to_left:
+                    pages.reverse()
+                page_width, page_height = min(width, height), max(width, height)
+                # Normalize displayed heights without resampling either source.
+                ratios = [page.width / page.height for page, reader in pages]
+                draw_height = min(page_height, page_width / sum(ratios))
+                x = (page_width - draw_height * sum(ratios)) / 2
+                y = (page_height - draw_height) / 2
+                pdf.setPageSize((page_width, page_height))
+                for (page, reader), ratio in zip(pages, ratios):
+                    draw_width = draw_height * ratio
+                    pdf.drawImage(reader, x, y, draw_width, draw_height)
+                    x += draw_width
+                pdf.showPage()
+            index += group_size
+            page_count += 1
+            if progress and page_count % 50 == 0:
+                progress(f"Wrote {page_count}/{len(images) - len(starts)} PDF pages.")
+        pdf.save()
+        if overwrite:
+            os.replace(temporary_path, output)
+        else:
+            os.link(temporary_path, output)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return output, len(images) - len(starts)
+
+
 def convert_cbz_to_pdf(source, output=None, overwrite=False, spreads=None,
                        spread_threshold=0.08, progress=None):
     """Return (output path, page count); fit each complete image on a portrait page.
@@ -174,50 +227,8 @@ def convert_cbz_to_pdf(source, output=None, overwrite=False, spreads=None,
         )
         if not images:
             raise ValueError(f"No supported images found in {source}.")
-        starts = (detect_spreads(archive, images, spread_threshold, progress)
-                  if spreads is None else spread_starts(spreads, len(images)))
-        if progress:
-            pairs = ",".join(f"{start}-{start + 1}" for start in sorted(starts)) or "none"
-            progress(f"{'Detected' if spreads is None else 'Selected'} spreads: {pairs}")
-        with tempfile.NamedTemporaryFile(
-            dir=output.parent, prefix=f".{output.stem}-", suffix=".pdf", delete=False
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-        try:
-            pdf = canvas.Canvas(str(temporary_path))
-            pdf.setTitle(source.stem)
-            index = 0
-            page_count = 0
-            while index < len(images):
-                group_size = 2 if index + 1 in starts else 1
-                with ExitStack() as resources:
-                    pages = [resources.enter_context(read_page(archive, entry, output.parent))
-                             for entry in images[index:index + group_size]]
-                    width, height = pages[0][0].size
-                    page_width, page_height = min(width, height), max(width, height)
-                    # Normalize displayed heights without resampling either source.
-                    ratios = [page.width / page.height for page, reader in pages]
-                    draw_height = min(page_height, page_width / sum(ratios))
-                    x = (page_width - draw_height * sum(ratios)) / 2
-                    y = (page_height - draw_height) / 2
-                    pdf.setPageSize((page_width, page_height))
-                    for (page, reader), ratio in zip(pages, ratios):
-                        draw_width = draw_height * ratio
-                        pdf.drawImage(reader, x, y, draw_width, draw_height)
-                        x += draw_width
-                    pdf.showPage()
-                index += group_size
-                page_count += 1
-                if progress and page_count % 50 == 0:
-                    progress(f"Wrote {page_count}/{len(images) - len(starts)} PDF pages.")
-            pdf.save()
-            if overwrite:
-                os.replace(temporary_path, output)
-            else:
-                os.link(temporary_path, output)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-    return output, len(images) - len(starts)
+        return write_image_pdf(archive, images, output, source.stem, overwrite,
+                               spreads, spread_threshold, progress)
 
 
 def main():

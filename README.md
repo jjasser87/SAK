@@ -82,6 +82,24 @@ Converts a CBZ comic archive into a PDF. By default, it compares adjacent image 
 - **Safety**: Archive paths are never extracted. A corrupt image stops conversion and leaves any existing PDF intact. The output folder must already exist.
 - **Dependencies**: Requires `Pillow` and `reportlab` (both in `requirements.txt`).
 
+### 7. `convert_epub_to_pdf.py`
+Converts comic and text EPUBs into PDFs. Chooses the conversion mode automatically from the book's content.
+- **Usage**:
+  - `python converters/convert_epub_to_pdf.py "book.epub"` (creates `book.pdf` beside the EPUB)
+  - `python converters/convert_epub_to_pdf.py "comic.epub" -o "reading copy.pdf"`
+  - `python converters/convert_epub_to_pdf.py "comic.epub" --spreads "2-3,12-13"`
+  - `python converters/convert_epub_to_pdf.py "comic.epub" --no-auto-spreads`
+  - `python converters/convert_epub_to_pdf.py "comic.epub" --spread-threshold 0.05`
+  - `python converters/convert_epub_to_pdf.py "book.epub" --page-size LETTER --font-size 14`
+  - Add `--overwrite` to replace an existing PDF.
+- **Comic mode**: When every primary reading-order document contains a single page image without prose or other artwork, uses the same automatic spread detector and portrait layout as the CBZ converter. Supports raster images in XHTML `<img>` and simple SVG `<image>` wrappers, including relative and URL-encoded paths. Unreferenced images are not appended. Original image quality, EXIF orientation, and white transparency backgrounds follow the CBZ behavior.
+- **Reading order**: Follows the EPUB package's spine, not filename order. Non-linear items and navigation documents are excluded from comic pages. Pair numbers count images in that reading order, including the cover if it is in the spine. Right-to-left books use their declared reading direction for edge matching and pair placement; `--reading-direction ltr` or `rtl` overrides it for comics.
+- **Text and mixed-content books**: Uses PyMuPDF's EPUB renderer to reflow the complete book into searchable portrait pages, including illustrations, headings, and supported styling. Defaults to A4 and an 11-point base font; `--page-size` accepts `A4` or `LETTER`, and `--font-size` accepts 6-48 points. Publisher CSS can override the base font size. Metadata, available chapter outlines, and external URI links are copied. Internal link fidelity and complex CSS/fixed layouts depend on the renderer; exact reproduction of every EPUB layout is not guaranteed.
+- **Mode overrides**: `--mode text` forces full-book rendering. `--mode comic` requires image-only page documents and errors if it would discard text or complex artwork. Text/mixed-content mode does not join spreads or rasterize the text; explicit `--spreads` is rejected in that mode. Automatic comic detection remains a heuristic, with the same limitations and overrides as the CBZ converter.
+- **Safety**: Archive paths are never used as extraction destinations. Invalid resources or conversion failures leave an existing output intact. The output directory must already exist. DRM-protected content is not supported.
+- **Dependencies**: `Pillow`, `reportlab`, and `PyMuPDF>=1.24.9`, included in `requirements.txt`. Install with `pip install -r requirements.txt`.
+- **Format references**: [EPUB reading order](https://www.w3.org/TR/epub-33/) and [PyMuPDF document conversion](https://pymupdf.readthedocs.io/en/latest/document.html).
+
 ## Article Extractor
 
 `articles/extract_articles.py` downloads web pages, isolates the readable article body,
