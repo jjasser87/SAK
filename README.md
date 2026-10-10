@@ -66,6 +66,22 @@ Combines the images in a folder into one PDF, with one image per page.
 - **Pages**: Each page matches its image dimensions at 72 pixels per inch, with EXIF orientation applied and transparent areas rendered on white. Subfolders are excluded unless `--recursive` is supplied. The output's parent folder must already exist.
 - **Dependencies**: Requires `Pillow` and `reportlab` (both in `requirements.txt`).
 
+### 6. `convert_cbz_to_pdf.py`
+Converts a CBZ comic archive into a PDF. By default, it compares adjacent image edges to detect and join two-page spreads on one portrait page. Wide images already containing a spread also fit on portrait pages.
+- **Usage**:
+  - `python converters/convert_cbz_to_pdf.py "comic.cbz"` (creates `comic.pdf` beside the archive)
+  - `python converters/convert_cbz_to_pdf.py "comic.cbz" -o "reading copy.pdf"`
+  - `python converters/convert_cbz_to_pdf.py "comic.cbz" --spreads "2-3,12-13"` (joins images 2 and 3, and images 12 and 13, side by side)
+  - `python converters/convert_cbz_to_pdf.py "comic.cbz" --no-auto-spreads` (keeps every source image separate)
+  - `python converters/convert_cbz_to_pdf.py "comic.cbz" --spread-threshold 0.05` (stricter automatic matching; default is 0.08)
+  - Add `--overwrite` to replace an existing PDF.
+- **Layout**: Wide images are scaled proportionally and centered on portrait paper, with white space above and below; nothing is split, cropped, or rotated. Portrait images retain their dimensions at 72 pixels per inch; wide images use their dimensions swapped as the paper size. Square images use square pages. EXIF orientation is applied and transparency is rendered on white.
+- **Automatic detection**: Compares vertical color profiles at the right edge of one portrait image and the left edge of the next, independent of filenames, page parity, and image resolution. Requires varied, closely matching edges with consistent alignment; rejects uniform margins and ambiguous overlapping matches. Prints detected pairs and progress. This is a heuristic: cropped, guttered, or misaligned scans may be missed, and similar artwork may produce false matches. Review the pairs; use a lower threshold, `--spreads`, or `--no-auto-spreads` to override detection. No comic-specific page lists are built into the script.
+- **Separate spread halves**: `--spreads` replaces automatic detection with your explicit list. It uses 1-based positions in the naturally sorted image list, including the cover, not the comic's printed page numbers. Each pair must be adjacent and cannot overlap another pair. The first image is placed on the left and the second on the right, touching at the seam, scaled proportionally to a common height on the first image's portrait paper size. All unlisted pages remain separate. Original JPEG data is embedded without recompression when no orientation correction is needed.
+- **Ordering**: Natural, case-insensitive archive-path order (`page2` before `page10`), including nested folders. Non-image files, hidden entries, and macOS metadata are ignored. Animated images use the first frame only.
+- **Safety**: Archive paths are never extracted. A corrupt image stops conversion and leaves any existing PDF intact. The output folder must already exist.
+- **Dependencies**: Requires `Pillow` and `reportlab` (both in `requirements.txt`).
+
 ## Article Extractor
 
 `articles/extract_articles.py` downloads web pages, isolates the readable article body,
